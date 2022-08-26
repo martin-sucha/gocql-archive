@@ -1064,6 +1064,12 @@ func marshalFloat(info TypeInfo, value interface{}) ([]byte, error) {
 		return nil, nil
 	case float32:
 		return encInt(int32(math.Float32bits(v))), nil
+	case int64:
+		return encInt(int32(math.Float32bits(float32(v)))), nil
+	case float64:
+		f := float32(v)
+		return encInt(int32(math.Float32bits(f))), nil
+
 	}
 
 	if value == nil {
@@ -1082,6 +1088,7 @@ func unmarshalFloat(info TypeInfo, data []byte, value interface{}) error {
 	switch v := value.(type) {
 	case Unmarshaler:
 		return v.UnmarshalCQL(info, data)
+
 	case *float32:
 		*v = math.Float32frombits(uint32(decInt(data)))
 		return nil
@@ -1249,6 +1256,18 @@ func marshalTimestamp(info TypeInfo, value interface{}) ([]byte, error) {
 		return nil, nil
 	case int64:
 		return encBigInt(v), nil
+	case string:
+		defaultLayout := time.RFC3339
+		if len(v) < len(defaultLayout) {
+			defaultLayout = string(defaultLayout[:len(v)])
+		}
+		t, err := time.Parse(defaultLayout, v)
+		if err != nil {
+			return nil, err
+		}
+		x := int64(t.UTC().Unix()*1e3) + int64(t.UTC().Nanosecond()/1e6)
+		return encBigInt(x), nil
+
 	case time.Time:
 		if v.IsZero() {
 			return []byte{}, nil
