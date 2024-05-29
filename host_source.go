@@ -11,8 +11,12 @@ import (
 	"time"
 )
 
-var ErrCannotFindHost = errors.New("cannot find host")
-var ErrHostAlreadyExists = errors.New("host already exists")
+var (
+	ErrRefreshWhenStopRequested = errors.New("gocql: could not refresh ring because stop was requested")
+	ErrCannotFindHost           = errors.New("gocql: cannot find host")
+	ErrHostAlreadyExists        = errors.New("gocql: host already exists")
+	ErrZeroRowsReturned         = errors.New("gocql: query returned 0 rows")
+)
 
 type nodeState int32
 
@@ -52,24 +56,24 @@ func (c *cassVersion) unmarshal(data []byte) error {
 	v := strings.Split(version, ".")
 
 	if len(v) < 2 {
-		return fmt.Errorf("invalid version string: %s", data)
+		return fmt.Errorf("gocql: invalid version string: %s", data)
 	}
 
 	var err error
 	c.Major, err = strconv.Atoi(v[0])
 	if err != nil {
-		return fmt.Errorf("invalid major version %v: %v", v[0], err)
+		return fmt.Errorf("gocql: invalid major version %v: %v", v[0], err)
 	}
 
 	c.Minor, err = strconv.Atoi(v[1])
 	if err != nil {
-		return fmt.Errorf("invalid minor version %v: %v", v[1], err)
+		return fmt.Errorf("gocql: invalid minor version %v: %v", v[1], err)
 	}
 
 	if len(v) > 2 {
 		c.Patch, err = strconv.Atoi(v[2])
 		if err != nil {
-			return fmt.Errorf("invalid patch version %v: %v", v[2], err)
+			return fmt.Errorf("gocql: invalid patch version %v: %v", v[2], err)
 		}
 	}
 
@@ -402,10 +406,10 @@ func (h *HostInfo) HostnameAndPort() string {
 }
 
 func (h *HostInfo) ConnectAddressAndPort() string {
-        h.mu.Lock()
-        defer h.mu.Unlock()
-        addr, _ := h.connectAddressLocked()
-        return net.JoinHostPort(addr.String(), strconv.Itoa(h.port))
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	addr, _ := h.connectAddressLocked()
+	return net.JoinHostPort(addr.String(), strconv.Itoa(h.port))
 }
 
 func (h *HostInfo) String() string {
@@ -448,7 +452,7 @@ func checkSystemSchema(control *controlConn) (bool, error) {
 // Given a map that represents a row from either system.local or system.peers
 // return as much information as we can in *HostInfo
 func (s *Session) hostInfoFromMap(row map[string]interface{}, host *HostInfo) (*HostInfo, error) {
-	const assertErrorMsg = "Assertion failed for %s"
+	const assertErrorMsg = "gocql: Assertion failed for %s"
 	var ok bool
 
 	// Default to our connected port if the cluster doesn't have port information
@@ -574,7 +578,7 @@ func (s *Session) hostInfoFromIter(iter *Iter, connectAddress net.IP, defaultPor
 	}
 
 	if len(rows) == 0 {
-		return nil, errors.New("query returned 0 rows")
+		return nil, ErrZeroRowsReturned
 	}
 
 	host, err := s.hostInfoFromMap(rows[0], &HostInfo{connectAddress: connectAddress, port: defaultPort})
@@ -600,7 +604,7 @@ func (r *ringDescriber) getLocalHostInfo() (*HostInfo, error) {
 
 	host, err := r.session.hostInfoFromIter(iter, nil, r.session.cfg.Port)
 	if err != nil {
-		return nil, fmt.Errorf("could not retrieve local host info: %w", err)
+		return nil, fmt.Errorf("gocql: could not retrieve local host info: %w", err)
 	}
 	return host, nil
 }
@@ -623,7 +627,7 @@ func (r *ringDescriber) getClusterPeerInfo(localHost *HostInfo) ([]*HostInfo, er
 	rows, err := iter.SliceMap()
 	if err != nil {
 		// TODO(zariel): make typed error
-		return nil, fmt.Errorf("unable to fetch peer host info: %s", err)
+		return nil, fmt.Errorf("gocql: unable to fetch peer host info: %w", err)
 	}
 
 	for _, row := range rows {
@@ -686,7 +690,7 @@ func (s *Session) debounceRingRefresh() {
 func (s *Session) refreshRing() error {
 	err, ok := <-s.ringRefresher.refreshNow()
 	if !ok {
-		return errors.New("could not refresh ring because stop was requested")
+		return ErrRefreshWhenStopRequested
 	}
 
 	return err
@@ -712,7 +716,7 @@ func refreshRing(r *ringDescriber) error {
 			newHostID := h.HostID()
 			existing, ok := prevHosts[newHostID]
 			if !ok {
-				return fmt.Errorf("get existing host=%s from prevHosts: %w", h, ErrCannotFindHost)
+				return fmt.Errorf("gocql: get existing host=%s from prevHosts: %w", h, ErrCannotFindHost)
 			}
 			if h.connectAddress.Equal(existing.connectAddress) && h.nodeToNodeAddress().Equal(existing.nodeToNodeAddress()) {
 				// no host IP change
@@ -722,7 +726,7 @@ func refreshRing(r *ringDescriber) error {
 				// remove old HostInfo (w/old IP)
 				r.session.removeHost(existing)
 				if _, alreadyExists := r.session.ring.addHostIfMissing(h); alreadyExists {
-					return fmt.Errorf("add new host=%s after removal: %w", h, ErrHostAlreadyExists)
+					return fmt.Errorf("gocql: add new host=%s after removal: %w", h, ErrHostAlreadyExists)
 				}
 				// add new HostInfo (same hostID, new IP)
 				r.session.startPoolFill(h)

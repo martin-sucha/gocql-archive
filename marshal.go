@@ -27,7 +27,7 @@ var (
 )
 
 var (
-	ErrorUDTUnavailable = errors.New("UDT are not available on protocols less than 3, please update config")
+	ErrorUDTUnavailable = errors.New("gocql: UDT are not available on protocols less than 3, please update config")
 )
 
 // Marshaler is the interface implemented by objects that can marshal
@@ -158,7 +158,7 @@ func Marshal(info TypeInfo, value interface{}) ([]byte, error) {
 	}
 
 	// TODO(tux21b): add the remaining types
-	return nil, fmt.Errorf("can not marshal %T into %s", value, info)
+	return nil, marshalErrorf("can not marshal %T into %s", value, info)
 }
 
 // Unmarshal parses the CQL encoded data based on the info parameter that
@@ -262,7 +262,7 @@ func Unmarshal(info TypeInfo, data []byte, value interface{}) error {
 	}
 
 	// TODO(tux21b): add the remaining types
-	return fmt.Errorf("can not unmarshal %s into %T", info, value)
+	return unmarshalErrorf("can not unmarshal %s into %T", info, value)
 }
 
 func isNullableValue(value interface{}) bool {
@@ -2713,15 +2713,17 @@ func (m MarshalError) Error() string {
 }
 
 func marshalErrorf(format string, args ...interface{}) MarshalError {
-	return MarshalError(fmt.Sprintf(format, args...))
+	return MarshalError(fmt.Sprintf(gocqlErr+format, args...))
 }
 
 type UnmarshalError string
+
+const gocqlErr = "gocql: "
 
 func (m UnmarshalError) Error() string {
 	return string(m)
 }
 
 func unmarshalErrorf(format string, args ...interface{}) UnmarshalError {
-	return UnmarshalError(fmt.Sprintf(format, args...))
+	return UnmarshalError(fmt.Sprintf(gocqlErr+format, args...))
 }
