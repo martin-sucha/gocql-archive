@@ -133,7 +133,7 @@ type ConnConfig struct {
 	Keepalive        time.Duration
 	Logger           StdLogger
 	StructuredLogger AdvancedLogger
-	MinimumLogLevel  LogLevel
+	LegacyLogLevel   LogLevel
 
 	tlsConfig       *tls.Config
 	disableCoalesce bool
