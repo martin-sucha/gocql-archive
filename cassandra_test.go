@@ -32,9 +32,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/gocql/gocql/lz4"
 	"io"
 	"math"
 	"math/big"
+	"math/rand"
 	"net"
 	"reflect"
 	"strconv"
@@ -3287,4 +3289,144 @@ func TestQuery_NamedValues(t *testing.T) {
 	if err := session.Query("SELECT VALUE from gocql_test.named_query WHERE id = :id", NamedValue("id", 1)).Scan(&value); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestProtoV5_Query(t *testing.T) {
+	session := createSession(t, func(config *ClusterConfig) {
+		config.ProtoVersion = 5
+		config.Timeout = time.Hour
+	})
+	defer session.Close()
+
+	if err := createTable(session, "CREATE TABLE gocql_test.native_v5_query(id int, text_col text, PRIMARY KEY (id))"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := session.Query("INSERT INTO gocql_test.native_v5_query (id, text_col) VALUES (?, ?)", 1, "test").Exec(); err != nil {
+		t.Fatal(err)
+	}
+
+	var id int
+	var text string
+
+	if err := session.Query("SELECT * FROM gocql_test.native_v5_query").Scan(&id, &text); err != nil {
+		t.Fatal(err)
+	}
+
+	assertEqual(t, "id", id, 1)
+	assertEqual(t, "text_col", text, "test")
+}
+
+func TestProtoV5_Batch(t *testing.T) {
+	session := createSession(t, func(config *ClusterConfig) {
+		config.ProtoVersion = 5
+	})
+	defer session.Close()
+
+	if err := createTable(session, "CREATE TABLE gocql_test.native_v5_batch(id int, text_col text, PRIMARY KEY (id))"); err != nil {
+		t.Fatal(err)
+	}
+
+	b := session.NewBatch(LoggedBatch)
+	b.Query("INSERT INTO gocql_test.native_v5_batch (id, text_col) VALUES (?, ?)", 1, "test1")
+	b.Query("INSERT INTO gocql_test.native_v5_batch (id, text_col) VALUES (?, ?)", 2, "test2")
+
+	if err := session.ExecuteBatch(b); err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct {
+		id      int
+		textCol string
+	}
+
+	var results []result
+
+	iter := session.Query("SELECT * FROM gocql_test.native_v5_batch").Iter()
+
+	var res result
+	for iter.Scan(&res.id, &res.textCol) {
+		results = append(results, res)
+	}
+
+	if err := iter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	assertEqual(t, "id", results[0].id, 1)
+	assertEqual(t, "text_col", results[0].textCol, "test1")
+
+	assertEqual(t, "id", results[1].id, 2)
+	assertEqual(t, "text_col", results[1].textCol, "test2")
+}
+
+func TestProtoV5_LongQuery(t *testing.T) {
+	session := createSession(t, func(config *ClusterConfig) {
+		config.ProtoVersion = 5
+	})
+	defer session.Close()
+
+	if err := createTable(session, "CREATE TABLE gocql_test.native_v5_long_query(id int, text_col text, PRIMARY KEY (id))"); err != nil {
+		t.Fatal(err)
+	}
+
+	defer session.Close()
+
+	longString := randomString(2_000_000)
+
+	err := session.Query("INSERT INTO gocql_test.native_v5_long_query (id, text_col) VALUES (?, ?)", "1", longString).Exec()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var result string
+	err = session.Query("SELECT text_col FROM gocql_test.native_v5_long_query").Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertEqual(t, "result should equal inserted longString", longString, result)
+}
+
+func randomString(n int) string {
+	source := rand.NewSource(time.Now().UnixMilli())
+	r := rand.New(source)
+	var aplhabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	buf := make([]byte, n)
+	for i := 0; i < n; i++ {
+		buf[i] = aplhabet[r.Intn(len(aplhabet))]
+	}
+	return string(buf)
+}
+
+func TestCompressedQuery(t *testing.T) {
+	session := createSession(t, func(config *ClusterConfig) {
+		config.ProtoVersion = 5
+		config.Compressor = lz4.LZ4Compressor{}
+		config.Timeout = time.Hour
+		config.ConnectTimeout = time.Hour
+		config.WriteTimeout = time.Hour
+	})
+	defer session.Close()
+
+	if err := createTable(session, "CREATE TABLE gocql_test.native_v5_query_compressed(id int, text_col text, PRIMARY KEY (id))"); err != nil {
+		t.Fatal(err)
+	}
+
+	defer session.Close()
+
+	str := randomString(20)
+
+	err := session.Query("INSERT INTO gocql_test.native_v5_query_compressed (id, text_col) VALUES (?, ?)", "1", str).Exec()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var result string
+	err = session.Query("SELECT text_col FROM gocql_test.native_v5_query_compressed").Scan(&result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertEqual(t, "result should equal inserted str", str, result)
 }
